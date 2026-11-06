@@ -1,5 +1,8 @@
 /* قراءة الهوية والسجل التجاري عبر Gemini API (صور أو PDF) وإرجاع حقول جاهزة للتعبئة */
-const GEMINI_MODELS=["gemini-2.5-flash","gemini-flash-latest","gemini-2.5-flash-lite","gemini-2.5-flash"];
+const GEMINI_MODELS=["gemini-2.5-flash","gemini-2.5-flash-lite","gemini-flash-latest"];
+/* مهلة كل محاولة: إن لم يرد Gemini خلال 20 ثانية ننتقل للنموذج التالي بدل الانتظار الطويل */
+const GEMINI_TIMEOUT=20000;
+const geminiSignal=()=>{try{return AbortSignal.timeout(GEMINI_TIMEOUT)}catch(e){const c=new AbortController();setTimeout(()=>c.abort(),GEMINI_TIMEOUT);return c.signal}};
 const GEMINI_PROXY=()=>String(window.GEMINI_PROXY||"").trim().replace(/\/+$/,"");
 const GEMINI_URL=m=>(GEMINI_PROXY()||"https://generativelanguage.googleapis.com")+"/v1beta/models/"+m+":generateContent";
 
@@ -44,7 +47,7 @@ function blobToB64(b){
 /* الصور تُصغَّر إلى 2000px وتُرسل JPEG لتقليل الحجم؛ ملفات PDF تُرسل كما هي */
 async function geminiPrepFile(f){
   if(f.type==="application/pdf"||/\.pdf$/i.test(f.name))return{mime:"application/pdf",data:await blobToB64(f)};
-  const bmp=await createImageBitmap(f),k=Math.min(1,2000/Math.max(bmp.width,bmp.height));
+  const bmp=await createImageBitmap(f),k=Math.min(1,1600/Math.max(bmp.width,bmp.height));
   const c=document.createElement("canvas");c.width=Math.max(1,Math.round(bmp.width*k));c.height=Math.max(1,Math.round(bmp.height*k));
   const x=c.getContext("2d");x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);x.drawImage(bmp,0,0,c.width,c.height);
   const blob=await new Promise(r=>c.toBlob(r,"image/jpeg",.92));
@@ -54,20 +57,21 @@ async function geminiReadFile(f){
   const proxy=GEMINI_PROXY(),key=proxy?"":geminiKey();
   if(!proxy&&!key)throw new Error("أدخل مفتاح Gemini في الخانة أعلى الصفحة");
   const {mime,data}=await geminiPrepFile(f);
-  const body=JSON.stringify({
+  /* إيقاف "التفكير" في gemini-2.5-flash لتسريع الاستخراج */
+  const mkBody=m=>JSON.stringify({
     contents:[{role:"user",parts:[{inlineData:{mimeType:mime,data}},{text:GEMINI_PROMPT}]}],
-    generationConfig:{temperature:0,responseMimeType:"application/json",responseSchema:GEMINI_SCHEMA}
+    generationConfig:Object.assign({temperature:0,responseMimeType:"application/json",responseSchema:GEMINI_SCHEMA},m==="gemini-2.5-flash"?{thinkingConfig:{thinkingBudget:0}}:{})
   });
   let lastErr=null,busy=false;
   for(const m of GEMINI_MODELS){
     let res;
-    try{res=await fetch(GEMINI_URL(m),{method:"POST",headers:proxy?{"Content-Type":"application/json"}:{"Content-Type":"application/json","x-goog-api-key":key},body})}
-    catch(e){throw new Error("تعذّر الاتصال بـ Gemini، تحقق من الإنترنت")}
+    try{res=await fetch(GEMINI_URL(m),{method:"POST",headers:proxy?{"Content-Type":"application/json"}:{"Content-Type":"application/json","x-goog-api-key":key},body:mkBody(m),signal:geminiSignal()})}
+    catch(e){if(e&&(e.name==="TimeoutError"||e.name==="AbortError")){busy=true;continue}throw new Error("تعذّر الاتصال بـ Gemini، تحقق من الإنترنت")}
     const j=await res.json().catch(()=>({}));
     if(!res.ok){
       lastErr=new Error((j.error&&j.error.message)||("خطأ Gemini "+res.status));
       /* 404 غير متاح، 429/500/503 ازدحام مؤقت: جرّب النموذج التالي بعد لحظة */
-      if([404,429,500,503].includes(res.status)){busy=busy||res.status!==404;if(res.status!==404)await new Promise(r=>setTimeout(r,1500));continue}
+      if([404,429,500,502,503,504,524].includes(res.status)){busy=busy||res.status!==404;if(res.status!==404)await new Promise(r=>setTimeout(r,1500));continue}
       throw lastErr;
     }
     const parts=(j.candidates&&j.candidates[0]&&j.candidates[0].content&&j.candidates[0].content.parts)||[];
