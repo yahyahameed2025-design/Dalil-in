@@ -1,5 +1,5 @@
 /* قراءة الهوية والسجل التجاري عبر Gemini API (صور أو PDF) وإرجاع حقول جاهزة للتعبئة */
-const GEMINI_MODELS=["gemini-flash-latest","gemini-2.5-flash","gemini-2.0-flash"];
+const GEMINI_MODELS=["gemini-2.5-flash","gemini-flash-latest","gemini-2.5-flash-lite","gemini-2.5-flash"];
 const GEMINI_PROXY=()=>String(window.GEMINI_PROXY||"").trim().replace(/\/+$/,"");
 const GEMINI_URL=m=>(GEMINI_PROXY()||"https://generativelanguage.googleapis.com")+"/v1beta/models/"+m+":generateContent";
 
@@ -58,7 +58,7 @@ async function geminiReadFile(f){
     contents:[{role:"user",parts:[{inlineData:{mimeType:mime,data}},{text:GEMINI_PROMPT}]}],
     generationConfig:{temperature:0,responseMimeType:"application/json",responseSchema:GEMINI_SCHEMA}
   });
-  let lastErr=null;
+  let lastErr=null,busy=false;
   for(const m of GEMINI_MODELS){
     let res;
     try{res=await fetch(GEMINI_URL(m),{method:"POST",headers:proxy?{"Content-Type":"application/json"}:{"Content-Type":"application/json","x-goog-api-key":key},body})}
@@ -66,7 +66,8 @@ async function geminiReadFile(f){
     const j=await res.json().catch(()=>({}));
     if(!res.ok){
       lastErr=new Error((j.error&&j.error.message)||("خطأ Gemini "+res.status));
-      if(res.status===404)continue; /* النموذج غير متاح: جرّب التالي */
+      /* 404 غير متاح، 429/500/503 ازدحام مؤقت: جرّب النموذج التالي بعد لحظة */
+      if([404,429,500,503].includes(res.status)){busy=busy||res.status!==404;if(res.status!==404)await new Promise(r=>setTimeout(r,1500));continue}
       throw lastErr;
     }
     const parts=(j.candidates&&j.candidates[0]&&j.candidates[0].content&&j.candidates[0].content.parts)||[];
@@ -77,5 +78,6 @@ async function geminiReadFile(f){
     for(const k of["companyEn","companyAr","crNo","addrEn","addrAr","personAr","personEn"])clean[k]=String(o[k]||"").replace(/\s+/g," ").trim();
     return clean;
   }
+  if(busy)throw new Error("Gemini مزدحم حالياً، أعد المحاولة بعد لحظات");
   throw lastErr||new Error("لا يوجد نموذج Gemini متاح");
 }
