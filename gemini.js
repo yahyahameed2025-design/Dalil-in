@@ -1,7 +1,7 @@
 /* قراءة الهوية والسجل التجاري عبر Gemini API (صور أو PDF) وإرجاع حقول جاهزة للتعبئة */
-const GEMINI_MODELS=["gemini-2.5-flash","gemini-2.5-flash-lite","gemini-flash-latest"];
-/* مهلة كل محاولة: إن لم يرد Gemini خلال 20 ثانية ننتقل للنموذج التالي بدل الانتظار الطويل */
-const GEMINI_TIMEOUT=20000;
+const GEMINI_MODELS=["gemini-3.8-flash","gemini-3.6-flash"];
+/* مهلة كل محاولة: إن لم يرد Gemini خلال 45 ثانية ننتقل للنموذج التالي بدل الانتظار الطويل */
+const GEMINI_TIMEOUT=45000;
 const geminiSignal=()=>{try{return AbortSignal.timeout(GEMINI_TIMEOUT)}catch(e){const c=new AbortController();setTimeout(()=>c.abort(),GEMINI_TIMEOUT);return c.signal}};
 const GEMINI_PROXY=()=>String(window.GEMINI_PROXY||"").trim().replace(/\/+$/,"");
 const GEMINI_URL=m=>(GEMINI_PROXY()||"https://generativelanguage.googleapis.com")+"/v1beta/models/"+m+":generateContent";
@@ -57,10 +57,10 @@ async function geminiReadFile(f){
   const proxy=GEMINI_PROXY(),key=proxy?"":geminiKey();
   if(!proxy&&!key)throw new Error("أدخل مفتاح Gemini في الخانة أعلى الصفحة");
   const {mime,data}=await geminiPrepFile(f);
-  /* إيقاف "التفكير" في gemini-2.5-flash لتسريع الاستخراج */
+  /* نماذج Gemini 3 لا تقبل temperature؛ مستوى تفكير منخفض لتسريع القراءة */
   const mkBody=m=>JSON.stringify({
     contents:[{role:"user",parts:[{inlineData:{mimeType:mime,data}},{text:GEMINI_PROMPT}]}],
-    generationConfig:Object.assign({temperature:0,responseMimeType:"application/json",responseSchema:GEMINI_SCHEMA},m==="gemini-2.5-flash"?{thinkingConfig:{thinkingBudget:0}}:{})
+    generationConfig:{responseMimeType:"application/json",responseSchema:GEMINI_SCHEMA,thinkingConfig:{thinkingLevel:"low"}}
   });
   let lastErr=null,busy=false;
   for(const m of GEMINI_MODELS){
