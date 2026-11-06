@@ -66,10 +66,10 @@ async function geminiReadFile(f){
   for(const m of GEMINI_MODELS){
     let res;
     try{res=await fetch(GEMINI_URL(m),{method:"POST",headers:proxy?{"Content-Type":"application/json"}:{"Content-Type":"application/json","x-goog-api-key":key},body:mkBody(m),signal:geminiSignal()})}
-    catch(e){if(e&&(e.name==="TimeoutError"||e.name==="AbortError")){busy=true;continue}throw new Error("تعذّر الاتصال بـ Gemini، تحقق من الإنترنت")}
+    catch(e){if(e&&(e.name==="TimeoutError"||e.name==="AbortError")){busy=true;lastErr=new Error("[مهلة "+m+"] لم يرد خلال "+GEMINI_TIMEOUT/1000+" ثانية");continue}throw new Error("تعذّر الاتصال بـ Gemini، تحقق من الإنترنت")}
     const j=await res.json().catch(()=>({}));
     if(!res.ok){
-      lastErr=new Error((j.error&&j.error.message)||("خطأ Gemini "+res.status));
+      lastErr=new Error("["+res.status+" "+m+"] "+((j.error&&j.error.message)||("خطأ Gemini "+res.status)).slice(0,160));
       /* 404 غير متاح، 429/500/503 ازدحام مؤقت: جرّب النموذج التالي بعد لحظة */
       if([404,429,500,502,503,504,524].includes(res.status)){busy=busy||res.status!==404;if(res.status!==404)await new Promise(r=>setTimeout(r,1500));continue}
       throw lastErr;
@@ -82,6 +82,6 @@ async function geminiReadFile(f){
     for(const k of["companyEn","companyAr","crNo","addrEn","addrAr","personAr","personEn"])clean[k]=String(o[k]||"").replace(/\s+/g," ").trim();
     return clean;
   }
-  if(busy)throw new Error("Gemini مزدحم حالياً، أعد المحاولة بعد لحظات");
+  if(busy)throw new Error("Gemini مزدحم حالياً، أعد المحاولة بعد لحظات. آخر رد: "+(lastErr?lastErr.message:""));
   throw lastErr||new Error("لا يوجد نموذج Gemini متاح");
 }
