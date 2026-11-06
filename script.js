@@ -27,10 +27,9 @@ $("ext").onclick=async()=>{
   const st=$("st");st.className="";$("ext").disabled=true;
   const R={},merge=o=>{for(const k in o)if(o[k]&&!R[k])R[k]=o[k]},errs=[];
   try{
-    for(const f of files){
-      st.textContent="جارٍ قراءة "+f.name+" بواسطة Gemini…";
-      try{merge(await geminiReadFile(f))}catch(e){errs.push(f.name+": "+(e.message||e))}
-    }
+    st.textContent="جارٍ قراءة "+files.length+" ملف بواسطة Gemini…";
+    const outs=await Promise.all(files.map(async f=>{try{return await geminiReadFile(f)}catch(e){errs.push(f.name+": "+(e.message||e));return null}}));
+    for(const o of outs)if(o)merge(o);
     $("nameAr").value=R.companyAr||R.personAr||"";$("nameEn").value=R.companyEn||R.personEn||"";
     $("addrAr").value=R.addrAr||"";$("addrEn").value=R.addrEn||"";$("cr").value=R.crNo||"";
     $("sigAr").value=R.personAr||"";$("sigEn").value=R.personEn||"";
